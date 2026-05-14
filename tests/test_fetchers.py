@@ -2,8 +2,28 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from unittest.mock import patch
+from urllib.error import HTTPError
 
-from stock_report.fetchers import _parse_yahoo_chart_market, extract_article_text, fetch_twse_institution_summary
+from stock_report.fetchers import DataClient, _parse_yahoo_chart_market, extract_article_text, fetch_twse_institution_summary
+
+
+class FakeHeaders:
+    def get_content_charset(self) -> str | None:
+        return None
+
+
+class FakeResponse:
+    headers = FakeHeaders()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self) -> bytes:
+        return "ok".encode("utf-8")
 
 
 class FakeClient:
@@ -61,6 +81,18 @@ class FetchersTest(unittest.TestCase):
         self.assertIn("台積電今日說明", text)
         self.assertIn("供電時程仍待正式計畫確認", text)
         self.assertNotIn("bad()", text)
+
+    def test_get_text_retries_transient_http_errors(self) -> None:
+        transient = HTTPError("https://example.test", 502, "Bad Gateway", {}, None)
+        with patch("stock_report.fetchers.urllib.request.urlopen", side_effect=[transient, FakeResponse()]) as urlopen:
+            with patch("stock_report.fetchers.time.sleep"):
+                client = DataClient()
+                text = client.get_text("test source", "https://example.test")
+
+        self.assertEqual(text, "ok")
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(client.sources[-1].status, "OK")
+        self.assertEqual(client.sources[-1].detail, "retried 1 time(s)")
 
 
 if __name__ == "__main__":

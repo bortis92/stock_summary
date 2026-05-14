@@ -13,7 +13,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--date", help="Report date in YYYY-MM-DD. Defaults to today in local timezone.")
     parser.add_argument("--output-dir", default="reports",
-                        help="Directory for Markdown reports.")
+                        help="Directory for HTML reports.")
     parser.add_argument("--watchlist", default="./watchlist/watchlist.txt",
                         help="Path to watchlist text file.")
     return parser.parse_args()

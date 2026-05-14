@@ -23,8 +23,14 @@ from .fetchers import (
     fetch_twse_institution_summary,
     fetch_twse_quotes,
 )
-from .render import render_monthly_revenue_report, render_report
+from .render import markdown_to_html, render_monthly_revenue_report, render_report
 from .watchlist import load_watchlist
+
+
+DAILY_REPORTS = ("daily_0.html", "daily_1.html", "daily_2.html")
+MONTHLY_REPORT = "month.html"
+SEASON_REPORT = "season.html"
+INDEX_REPORT = "index.html"
 
 
 def build_report(report_date: date, output_dir: Path, watchlist_path: Path) -> Path:
@@ -92,10 +98,12 @@ def build_report(report_date: date, output_dir: Path, watchlist_path: Path) -> P
         warnings=warnings,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{report_date.isoformat()}.md"
-    output_path.write_text(markdown, encoding="utf-8")
+    rotate_daily_reports(output_dir)
+    output_path = output_dir / DAILY_REPORTS[0]
+    write_html_report(output_path, markdown_to_html(markdown))
     if 5 <= report_date.day <= 12:
         _write_monthly_revenue_report(report_date, output_dir, watchlist_codes)
+    write_report_index(output_dir)
     return output_path
 
 
@@ -111,8 +119,75 @@ def _write_monthly_revenue_report(report_date: date, output_dir: Path, watchlist
         revenue_screen=revenue_screen,
         sources=client.sources,
     )
-    output_path = output_dir / f"{revenue_month.year}-{revenue_month.month:02d}-month.md"
-    output_path.write_text(markdown, encoding="utf-8")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / MONTHLY_REPORT
+    write_html_report(output_path, markdown_to_html(markdown))
+    write_report_index(output_dir)
+    return output_path
+
+
+def rotate_daily_reports(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    oldest = output_dir / DAILY_REPORTS[2]
+    if oldest.exists():
+        oldest.unlink()
+    for current_name, next_name in zip(reversed(DAILY_REPORTS[:2]), reversed(DAILY_REPORTS[1:]), strict=True):
+        current = output_dir / current_name
+        if current.exists():
+            current.replace(output_dir / next_name)
+
+
+def write_html_report(path: Path, html: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html, encoding="utf-8")
+
+
+def write_report_index(output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cards = [
+        ("最新日報", "daily_0.html", "今日或最近一次產生的台股盤後快報"),
+        ("前一份日報", "daily_1.html", "上一份保留的台股盤後快報"),
+        ("前二份日報", "daily_2.html", "再前一份保留的台股盤後快報"),
+        ("最新月營收報告", "month.html", "最新覆寫的月營收追蹤報告"),
+        ("最新季報", "season.html", "最新覆寫的季報整理"),
+    ]
+    card_html = "\n".join(
+        f'      <a class="card" href="{href}"><span>{title}</span><small>{description}</small></a>'
+        for title, href, description in cards
+    )
+    html = f"""<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台股報告入口</title>
+  <style>
+    :root {{ color-scheme: light; --text:#172033; --muted:#5f6b7a; --line:#d9e0ea; --bg:#f6f8fb; --card:#ffffff; --accent:#0f766e; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","Microsoft JhengHei",Arial,sans-serif; background:var(--bg); color:var(--text); }}
+    main {{ max-width:980px; margin:0 auto; padding:40px 20px 56px; }}
+    h1 {{ margin:0 0 8px; font-size:clamp(30px,4vw,44px); letter-spacing:0; }}
+    p {{ margin:0 0 28px; color:var(--muted); line-height:1.7; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }}
+    .card {{ display:block; min-height:120px; padding:20px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--text); text-decoration:none; box-shadow:0 1px 3px rgba(20,32,50,.05); }}
+    .card:hover {{ border-color:var(--accent); }}
+    .card span {{ display:block; margin-bottom:10px; font-size:20px; font-weight:700; }}
+    .card small {{ color:var(--muted); line-height:1.6; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>台股報告入口</h1>
+    <p>選擇要查看的固定報告頁。日報保留最新三份，月營收報告與季報只保留最新版本。</p>
+    <section class="grid">
+{card_html}
+    </section>
+  </main>
+</body>
+</html>
+"""
+    output_path = output_dir / INDEX_REPORT
+    write_html_report(output_path, html)
     return output_path
 
 

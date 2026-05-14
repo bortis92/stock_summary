@@ -6,6 +6,7 @@ import json
 import re
 import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,21 +43,31 @@ class DataClient:
 
     def get_text(self, name: str, url: str, timeout: int = 20, encoding: str | None = None) -> str | None:
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        try:
-            with urllib.request.urlopen(request, timeout=timeout, context=self._ssl_context) as response:
-                body = response.read()
-                charset = encoding or response.headers.get_content_charset() or "utf-8"
-                text = body.decode(charset, errors="replace")
-                self.note(name, url, "OK")
-                return text
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            if _is_socket_permission_denied(exc):
-                text = _powershell_get_text(url, timeout=timeout)
-                if text is not None:
-                    self.note(name, url, "OK", "fetched via PowerShell Invoke-WebRequest (WinError 10013 fallback)")
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=timeout, context=self._ssl_context) as response:
+                    body = response.read()
+                    charset = encoding or response.headers.get_content_charset() or "utf-8"
+                    text = body.decode(charset, errors="replace")
+                    detail = f"retried {attempt} time(s)" if attempt else ""
+                    self.note(name, url, "OK", detail)
                     return text
-            self.note(name, url, "資料待確認", str(exc))
-            return None
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                if _is_socket_permission_denied(exc):
+                    text = _powershell_get_text(url, timeout=timeout)
+                    if text is not None:
+                        self.note(name, url, "OK", "fetched via PowerShell Invoke-WebRequest (WinError 10013 fallback)")
+                        return text
+                break
+        self.note(name, url, "資料待確認", str(last_error) if last_error else "")
+        return None
 
     def get_json(self, name: str, url: str) -> dict[str, Any] | None:
         text = self.get_text(name, url)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html as html_lib
+import re
 from datetime import date
 
 from .models import (
@@ -16,6 +18,136 @@ from .models import (
     StockQuote,
 )
 from .normalize import fmt_100m, fmt_lots, fmt_num, fmt_pct, fmt_revenue_100m
+
+
+URL_RE = re.compile(r"(https?://[^\s<]+)")
+MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
+
+
+def markdown_to_html(markdown: str, title: str | None = None) -> str:
+    lines = markdown.splitlines()
+    page_title = title or next((line.lstrip("#").strip() for line in lines if line.startswith("# ")), "台股報告")
+    body: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            level = min(max(level, 1), 6)
+            content = stripped[level:].strip()
+            body.append(f"<h{level}>{_inline_html(content)}</h{level}>")
+            i += 1
+            continue
+        if stripped.startswith(">"):
+            parts: list[str] = []
+            while i < len(lines) and lines[i].strip().startswith(">"):
+                parts.append(lines[i].strip()[1:].strip())
+                i += 1
+            body.append("<blockquote>" + "<br>".join(_inline_html(part) for part in parts) + "</blockquote>")
+            continue
+        if stripped.startswith("|") and i + 1 < len(lines) and TABLE_SEPARATOR_RE.match(lines[i + 1]):
+            headers = _split_table_row(stripped)
+            i += 2
+            rows: list[list[str]] = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                rows.append(_split_table_row(lines[i]))
+                i += 1
+            table_html = ['<div class="table-wrap"><table><thead><tr>']
+            table_html.extend(f"<th>{_inline_html(cell)}</th>" for cell in headers)
+            table_html.append("</tr></thead><tbody>")
+            for row in rows:
+                table_html.append("<tr>")
+                table_html.extend(f"<td>{_inline_html(cell)}</td>" for cell in row)
+                table_html.append("</tr>")
+            table_html.append("</tbody></table></div>")
+            body.append("".join(table_html))
+            continue
+        if stripped.startswith("- "):
+            body.append("<ul>")
+            while i < len(lines) and lines[i].strip().startswith("- "):
+                body.append(f"<li>{_inline_html(lines[i].strip()[2:].strip())}</li>")
+                i += 1
+            body.append("</ul>")
+            continue
+        paragraph = [stripped]
+        i += 1
+        while i < len(lines) and lines[i].strip() and not lines[i].strip().startswith(("#", ">", "|", "- ")):
+            paragraph.append(lines[i].strip())
+            i += 1
+        body.append("<p>" + _inline_html(" ".join(paragraph)) + "</p>")
+    css = """
+    :root { color-scheme: light; --text:#172033; --muted:#5f6b7a; --line:#d9e0ea; --bg:#f6f8fb; --card:#ffffff; --accent:#0f766e; --accent-soft:#e8f4f2; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","Microsoft JhengHei",Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.65; }
+    main { max-width:1180px; margin:0 auto; padding:32px 20px 56px; }
+    h1 { margin:0 0 24px; padding-bottom:16px; border-bottom:3px solid var(--accent); font-size:clamp(28px,4vw,42px); letter-spacing:0; }
+    h2 { margin:34px 0 14px; font-size:24px; letter-spacing:0; }
+    h3 { margin:26px 0 10px; font-size:19px; color:#26364d; letter-spacing:0; }
+    p, blockquote { margin:10px 0; }
+    blockquote { padding:10px 14px; border-left:4px solid var(--accent); background:var(--accent-soft); color:#23413e; }
+    a { color:#0f5f9e; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    ul { padding-left:24px; }
+    li { margin:4px 0; overflow-wrap:anywhere; }
+    .table-wrap { overflow-x:auto; background:var(--card); border:1px solid var(--line); border-radius:8px; margin:14px 0 22px; box-shadow:0 1px 3px rgba(20,32,50,.05); }
+    table { width:max-content; min-width:100%; border-collapse:collapse; table-layout:auto; }
+    th, td { padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { position:sticky; top:0; background:#eef3f8; font-weight:700; color:#24324a; white-space:nowrap; }
+    td { white-space:nowrap; max-width:220px; }
+    td:has(a) { max-width:280px; white-space:normal; }
+    tbody tr:nth-child(even) { background:#fafbfd; }
+    @media (max-width: 720px) { main { padding:24px 12px 44px; } th, td { padding:8px 9px; font-size:14px; } }
+    """.strip()
+    return (
+        "<!doctype html>\n"
+        '<html lang="zh-Hant">\n'
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        '  <meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"  <title>{html_lib.escape(page_title)}</title>\n"
+        "  <style>\n"
+        f"{css}\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "  <main>\n"
+        + "\n".join("    " + item for item in body)
+        + "\n  </main>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _inline_html(value: str) -> str:
+    pieces: list[str] = []
+    pos = 0
+    for match in MD_LINK_RE.finditer(value):
+        pieces.append(_escape_and_link_urls(value[pos:match.start()]))
+        label = html_lib.escape(match.group(1), quote=False)
+        href = html_lib.escape(match.group(2), quote=True)
+        pieces.append(f'<a href="{href}">{label}</a>')
+        pos = match.end()
+    pieces.append(_escape_and_link_urls(value[pos:]))
+    return "".join(pieces)
+
+
+def _escape_and_link_urls(value: str) -> str:
+    escaped = html_lib.escape(value, quote=False)
+    return URL_RE.sub(lambda match: f'<a href="{html_lib.escape(match.group(1), quote=True)}">{match.group(1)}</a>', escaped)
+
+
+def _split_table_row(line: str) -> list[str]:
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|"):
+        line = line[:-1]
+    return [cell.strip() for cell in line.split("|")]
 
 
 def table(headers: list[str], rows: list[list[str]]) -> str:

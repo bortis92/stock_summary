@@ -1,6 +1,6 @@
 # 台股盤後報告自動化
 
-每天台北時間 18:00 產生一份台股盤後 Markdown 報告，官方資料優先，缺資料時明確標示「尚未公布」或「資料待確認」。
+每天台北時間 18:00 產生一份台股盤後 HTML 報告，官方資料優先，缺資料時明確標示「尚未公布」或「資料待確認」。
 
 ## 使用方式
 
@@ -18,8 +18,15 @@ C:\Users\Lin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\pyt
 報告會輸出到：
 
 ```text
-reports/YYYY-MM-DD.md
+reports/index.html
+reports/daily_0.html
+reports/daily_1.html
+reports/daily_2.html
+reports/month.html
+reports/season.html
 ```
+
+`index.html` 是網頁入口。日報只保留最新三份：`daily_0.html` 是最新日報，`daily_1.html` 是前一份，`daily_2.html` 是前二份。月營收報告固定覆寫 `month.html`；季報固定使用 `season.html`。
 
 ## 追蹤清單
 

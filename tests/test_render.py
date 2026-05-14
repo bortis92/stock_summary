@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 
 from stock_report.models import InstitutionSummary, MarketTurnover, NewsDigest, RevenueRecord
-from stock_report.render import render_monthly_revenue_report, render_report
+from stock_report.render import markdown_to_html, render_monthly_revenue_report, render_report
 
 
 class RenderTest(unittest.TestCase):
@@ -56,6 +56,28 @@ class RenderTest(unittest.TestCase):
         )
         self.assertIn("最新月營收（億元）", markdown)
         self.assertIn("4,107.25 億元", markdown)
+
+    def test_converts_markdown_report_to_html(self) -> None:
+        html = markdown_to_html(
+            "\n".join(
+                [
+                    "# 測試報告",
+                    "",
+                    "> 摘要",
+                    "",
+                    "| 代號 | 名稱 |",
+                    "| --- | --- |",
+                    "| 2330 | 台積電 |",
+                    "",
+                    "- 來源：https://example.test/report",
+                ]
+            )
+        )
+
+        self.assertIn("<!doctype html>", html)
+        self.assertIn("<title>測試報告</title>", html)
+        self.assertIn("<table>", html)
+        self.assertIn('<a href="https://example.test/report">https://example.test/report</a>', html)
 
 
 if __name__ == "__main__":
