@@ -54,10 +54,12 @@ class PipelineOutputTest(unittest.TestCase):
 
     def test_report_index_contains_fixed_entry_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output_path = write_report_index(Path(tmp))
+            site_root = Path(tmp)
+            output_path = write_report_index(site_root / "reports")
             html = output_path.read_text(encoding="utf-8")
 
-        for href in ["daily_0.html", "daily_1.html", "daily_2.html", "month.html", "season.html"]:
+        self.assertEqual(output_path, site_root / "index.html")
+        for href in ["reports/daily_0.html", "reports/daily_1.html", "reports/daily_2.html", "reports/month.html", "reports/season.html"]:
             self.assertIn(f'href="{href}"', html)
         for label in ["最新日報", "前一份日報", "前二份日報", "最新月營收報告", "最新季報"]:
             self.assertIn(label, html)

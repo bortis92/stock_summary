@@ -18,7 +18,7 @@ C:\Users\Lin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\pyt
 報告會輸出到：
 
 ```text
-reports/index.html
+index.html
 reports/daily_0.html
 reports/daily_1.html
 reports/daily_2.html
@@ -26,7 +26,7 @@ reports/month.html
 reports/season.html
 ```
 
-`index.html` 是網頁入口。日報只保留最新三份：`daily_0.html` 是最新日報，`daily_1.html` 是前一份，`daily_2.html` 是前二份。月營收報告固定覆寫 `month.html`；季報固定使用 `season.html`。
+根目錄的 `index.html` 是 GitHub Pages 入口。日報只保留最新三份：`reports/daily_0.html` 是最新日報，`reports/daily_1.html` 是前一份，`reports/daily_2.html` 是前二份。月營收報告固定覆寫 `reports/month.html`；季報固定使用 `reports/season.html`。
 
 ## 追蹤清單
 

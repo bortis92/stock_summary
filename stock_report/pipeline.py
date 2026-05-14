@@ -142,14 +142,17 @@ def write_html_report(path: Path, html: str) -> None:
     path.write_text(html, encoding="utf-8")
 
 
-def write_report_index(output_dir: Path) -> Path:
+def write_report_index(output_dir: Path, site_root: Path | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    site_root = site_root or output_dir.parent
+    site_root.mkdir(parents=True, exist_ok=True)
+    report_prefix = output_dir.name
     cards = [
-        ("最新日報", "daily_0.html", "今日或最近一次產生的台股盤後快報"),
-        ("前一份日報", "daily_1.html", "上一份保留的台股盤後快報"),
-        ("前二份日報", "daily_2.html", "再前一份保留的台股盤後快報"),
-        ("最新月營收報告", "month.html", "最新覆寫的月營收追蹤報告"),
-        ("最新季報", "season.html", "最新覆寫的季報整理"),
+        ("最新日報", f"{report_prefix}/daily_0.html", "今日或最近一次產生的台股盤後快報"),
+        ("前一份日報", f"{report_prefix}/daily_1.html", "上一份保留的台股盤後快報"),
+        ("前二份日報", f"{report_prefix}/daily_2.html", "再前一份保留的台股盤後快報"),
+        ("最新月營收報告", f"{report_prefix}/month.html", "最新覆寫的月營收追蹤報告"),
+        ("最新季報", f"{report_prefix}/season.html", "最新覆寫的季報整理"),
     ]
     card_html = "\n".join(
         f'      <a class="card" href="{href}"><span>{title}</span><small>{description}</small></a>'
@@ -186,7 +189,7 @@ def write_report_index(output_dir: Path) -> Path:
 </body>
 </html>
 """
-    output_path = output_dir / INDEX_REPORT
+    output_path = site_root / INDEX_REPORT
     write_html_report(output_path, html)
     return output_path
 
