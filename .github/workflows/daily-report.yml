@@ -1,0 +1,51 @@
+name: Daily Taiwan Stock Report
+
+on:
+  schedule:
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-report:
+    runs-on: ubuntu-latest
+
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      WATCHLIST_TXT: ${{ secrets.WATCHLIST_TXT }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare private watchlist
+        run: |
+          mkdir -p watchlist
+          if [ -n "$WATCHLIST_TXT" ]; then
+            printf '%s\n' "$WATCHLIST_TXT" > watchlist/watchlist.txt
+          else
+            : > watchlist/watchlist.txt
+          fi
+
+      - name: Generate daily report
+        run: |
+          REPORT_DATE=$(TZ=Asia/Taipei date +'%F')
+          python run_daily.py --date "$REPORT_DATE" --output-dir reports --watchlist watchlist/watchlist.txt
+
+      - name: Commit report updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add index.html reports
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+          else
+            git commit -m "Update daily stock report"
+            git push
+          fi
