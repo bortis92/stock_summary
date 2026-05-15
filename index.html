@@ -1,98 +1,34 @@
 <!doctype html>
 <html lang="zh-Hant">
-
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>台股報告入口</title>
   <style>
-    :root {
-      color-scheme: light;
-      --text: #172033;
-      --muted: #5f6b7a;
-      --line: #d9e0ea;
-      --bg: #f6f8fb;
-      --card: #ffffff;
-      --accent: #0f766e;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    main {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 40px 20px 56px;
-    }
-
-    h1 {
-      margin: 0 0 8px;
-      font-size: clamp(30px, 4vw, 44px);
-      letter-spacing: 0;
-    }
-
-    p {
-      margin: 0 0 28px;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px;
-    }
-
-    .card {
-      display: block;
-      min-height: 120px;
-      padding: 20px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--card);
-      color: var(--text);
-      text-decoration: none;
-      box-shadow: 0 1px 3px rgba(20, 32, 50, .05);
-    }
-
-    .card:hover {
-      border-color: var(--accent);
-    }
-
-    .card span {
-      display: block;
-      margin-bottom: 10px;
-      font-size: 20px;
-      font-weight: 700;
-    }
-
-    .card small {
-      color: var(--muted);
-      line-height: 1.6;
-    }
+    :root { color-scheme: light; --text:#172033; --muted:#5f6b7a; --line:#d9e0ea; --bg:#f6f8fb; --card:#ffffff; --accent:#0f766e; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","Microsoft JhengHei",Arial,sans-serif; background:var(--bg); color:var(--text); }
+    main { max-width:980px; margin:0 auto; padding:40px 20px 56px; }
+    h1 { margin:0 0 8px; font-size:clamp(30px,4vw,44px); letter-spacing:0; }
+    p { margin:0 0 28px; color:var(--muted); line-height:1.7; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+    .card { display:block; min-height:120px; padding:20px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--text); text-decoration:none; box-shadow:0 1px 3px rgba(20,32,50,.05); }
+    .card:hover { border-color:var(--accent); }
+    .card span { display:block; margin-bottom:10px; font-size:20px; font-weight:700; }
+    .card small { color:var(--muted); line-height:1.6; }
   </style>
 </head>
-
 <body>
   <main>
     <h1>台股報告入口</h1>
-    <p>選擇要查看的固定報告頁(日報每日18:00更新)</p>
+    <p>選擇要查看的固定報告頁。日報保留最新三份，月營收報告與季報只保留最新版本。</p>
     <section class="grid">
-      <a class="card" href="reports/daily_0.html"><span>最新日報</span><small>今日台股盤後快報</small></a>
-      <a class="card" href="reports/daily_1.html"><span>前一日日報</span><small>前一工作日台股盤後快報</small></a>
-      <a class="card" href="reports/daily_2.html"><span>前二日日報</span><small>前二工作日台股盤後快報</small></a>
-      <a class="card" href="reports/month.html"><span>最新月營收報告</span><small>最新的月營收整理報告</small></a>
-      <a class="card" href="reports/season.html"><span>最新季報</span><small>最新的季報整理</small></a>
+      <a class="card" href="reports/daily_0.html"><span>最新日報</span><small>今日或最近一次產生的台股盤後快報</small></a>
+      <a class="card" href="reports/daily_1.html"><span>前一份日報</span><small>上一份保留的台股盤後快報</small></a>
+      <a class="card" href="reports/daily_2.html"><span>前二份日報</span><small>再前一份保留的台股盤後快報</small></a>
+      <a class="card" href="reports/month.html"><span>最新月營收報告</span><small>最新覆寫的月營收追蹤報告</small></a>
+      <a class="card" href="reports/season.html"><span>最新季報</span><small>最新覆寫的季報整理</small></a>
     </section>
   </main>
 </body>
-
 </html>

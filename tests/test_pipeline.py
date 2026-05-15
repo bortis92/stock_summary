@@ -6,8 +6,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from stock_report.models import RevenueRecord
-from stock_report.pipeline import _write_monthly_revenue_report, rotate_daily_reports, write_report_index
+from stock_report.models import QuarterlyFinancialRecord, RevenueRecord
+from stock_report.pipeline import _season_report_period_for_date, _write_monthly_revenue_report, _write_season_report, rotate_daily_reports, write_report_index
 
 
 class PipelineOutputTest(unittest.TestCase):
@@ -51,6 +51,37 @@ class PipelineOutputTest(unittest.TestCase):
             self.assertTrue((output_dir / "month.html").exists())
             self.assertFalse(any(output_dir.glob("*-month.html")))
             self.assertIn("月營收追蹤報告 2026-04", output_path.read_text(encoding="utf-8"))
+
+    def test_season_report_writes_fixed_season_file(self) -> None:
+        rows = [
+            QuarterlyFinancialRecord(
+                "2330",
+                "台積電",
+                "上市",
+                2026,
+                1,
+                operating_revenue=839_254_000,
+                operating_income=410_366_000,
+                net_income_attributable=361_560_000,
+                eps=13.94,
+            )
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            with patch("stock_report.pipeline.fetch_quarterly_financials", return_value=rows):
+                output_path = _write_season_report(2026, 1, output_dir, ["2330"])
+
+            self.assertEqual(output_path.name, "season.html")
+            self.assertTrue((output_dir / "season.html").exists())
+            self.assertFalse(any(output_dir.glob("*-season.html")))
+            self.assertIn("季報追蹤報告 2026 Q1", output_path.read_text(encoding="utf-8"))
+
+    def test_season_report_window_maps_to_latest_reporting_period(self) -> None:
+        self.assertEqual(_season_report_period_for_date(date(2026, 3, 20)), (2025, 4))
+        self.assertEqual(_season_report_period_for_date(date(2026, 5, 15)), (2026, 1))
+        self.assertEqual(_season_report_period_for_date(date(2026, 8, 14)), (2026, 2))
+        self.assertEqual(_season_report_period_for_date(date(2026, 11, 14)), (2026, 3))
+        self.assertIsNone(_season_report_period_for_date(date(2026, 7, 1)))
 
     def test_report_index_contains_fixed_entry_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

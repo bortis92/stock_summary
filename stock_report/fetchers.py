@@ -23,6 +23,7 @@ from .models import (
     InstitutionSummary,
     MarketTurnover,
     NewsItem,
+    QuarterlyFinancialRecord,
     RevenueRecord,
     SourceNote,
     StockQuote,
@@ -78,6 +79,43 @@ class DataClient:
         except json.JSONDecodeError as exc:
             self.note(name, url, "資料待確認", f"JSON parse failed: {exc}")
             return None
+
+    def post_text(self, name: str, url: str, data: dict[str, Any], timeout: int = 20, encoding: str | None = None) -> str | None:
+        encoded = urllib.parse.urlencode(data, doseq=True).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=encoded,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=timeout, context=self._ssl_context) as response:
+                    body = response.read()
+                    charset = encoding or response.headers.get_content_charset() or "utf-8"
+                    text = body.decode(charset, errors="replace")
+                    detail = f"retried {attempt} time(s)" if attempt else ""
+                    self.note(name, url, "OK", detail)
+                    return text
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                if _is_socket_permission_denied(exc):
+                    text = _powershell_post_text(url, data, timeout=timeout)
+                    if text is not None:
+                        self.note(name, url, "OK", "posted via PowerShell Invoke-WebRequest (WinError 10013 fallback)")
+                        return text
+                break
+        self.note(name, url, "資料待確認", str(last_error) if last_error else "")
+        return None
 
 
 def fetch_twse_quotes(client: DataClient, report_date: date) -> tuple[list[StockQuote], list[IndexSummary], bool]:
@@ -365,6 +403,171 @@ def fetch_revenues(client: DataClient, report_date: date) -> list[RevenueRecord]
     return records
 
 
+def fetch_quarterly_financials(client: DataClient, year: int, quarter: int) -> list[QuarterlyFinancialRecord]:
+    records = _fetch_quarterly_financial_period(client, year, quarter)
+    previous_year_records = {r.code: r for r in _fetch_quarterly_financial_period(client, year - 1, quarter)}
+    previous_year, previous_quarter = _previous_quarter(year, quarter)
+    previous_quarter_records = {r.code: r for r in _fetch_quarterly_financial_period(client, previous_year, previous_quarter)}
+    for record in records:
+        _attach_quarterly_comparisons(record, previous_year_records.get(record.code), previous_quarter_records.get(record.code))
+    return records
+
+
+def fetch_quarterly_financials_for_codes(
+    client: DataClient,
+    year: int,
+    quarter: int,
+    codes: list[str],
+) -> list[QuarterlyFinancialRecord]:
+    records = _fetch_mopsfin_quarterly_financials(client, year, quarter, codes)
+    previous_year_records = {r.code: r for r in _fetch_mopsfin_quarterly_financials(client, year - 1, quarter, codes)}
+    previous_year, previous_quarter = _previous_quarter(year, quarter)
+    previous_quarter_records = {r.code: r for r in _fetch_mopsfin_quarterly_financials(client, previous_year, previous_quarter, codes)}
+    for record in records:
+        _attach_quarterly_comparisons(record, previous_year_records.get(record.code), previous_quarter_records.get(record.code))
+    return records
+
+
+def _fetch_mopsfin_quarterly_financials(
+    client: DataClient,
+    year: int,
+    quarter: int,
+    codes: list[str],
+) -> list[QuarterlyFinancialRecord]:
+    clean_codes = [code.strip() for code in codes if code.strip()]
+    if not clean_codes:
+        return []
+    url = "https://mopsfin.twse.com.tw/compare/report"
+    records: list[QuarterlyFinancialRecord] = []
+    for index in range(0, len(clean_codes), 5):
+        chunk = clean_codes[index : index + 5]
+        payload = {
+            "compareItem": "IncomeStatement",
+            "quarter": "true",
+            "ylabel": "",
+            "ys": f"{year}{quarter}",
+            "bcodeAvg": "false",
+            "companyAvg": "false",
+            "qnumber": "",
+            "companyId": chunk,
+        }
+        text = client.post_text(f"mopsfin 季報綜合損益 {year}Q{quarter} 追蹤清單", url, payload)
+        if not text:
+            continue
+        records.extend(_parse_mopsfin_income_statement_html(text, year, quarter))
+    return list({record.code: record for record in records}.values())
+
+
+def _parse_mopsfin_income_statement_html(text: str, year: int, quarter: int) -> list[QuarterlyFinancialRecord]:
+    rows = _TableParser.parse(text)
+    account_names: list[str] = []
+    company_headers: list[str] = []
+    value_columns: list[list[str]] = []
+    waiting_for_company_headers = False
+    for row in rows:
+        if len(row) == 1 and row[0] and row[0] not in {"報表類別", "會計科目"}:
+            account_names.append(row[0])
+            continue
+        if len(row) >= 1 and all(_normalize_header(cell) in {"合併", "個別"} for cell in row):
+            waiting_for_company_headers = True
+            continue
+        if waiting_for_company_headers:
+            company_headers = row
+            value_columns = [[] for _ in company_headers]
+            waiting_for_company_headers = False
+            continue
+        if company_headers and len(row) >= len(company_headers):
+            values = row[-len(company_headers) :]
+            for column, value in zip(value_columns, values, strict=False):
+                column.append(value)
+    records: list[QuarterlyFinancialRecord] = []
+    for header, values in zip(company_headers, value_columns, strict=False):
+        code, name, market = _parse_mopsfin_company_header(header)
+        if not code:
+            continue
+        record = dict(zip([_normalize_header(name) for name in account_names], values, strict=False))
+        item = QuarterlyFinancialRecord(
+            code=code,
+            name=name,
+            market=market,
+            year=year,
+            quarter=quarter,
+            operating_revenue=_number_field(record, "營業收入合計", "營業收入"),
+            gross_profit=_number_field(record, "營業毛利毛損淨額", "營業毛利毛損", "營業毛利"),
+            operating_income=_number_field(record, "營業利益損失", "營業利益"),
+            profit_before_tax=_number_field(record, "稅前淨利淨損", "稅前淨利"),
+            net_income=_number_field(record, "本期淨利淨損", "繼續營業單位本期淨利淨損"),
+            net_income_attributable=_number_field(record, "本期淨利淨損歸屬於母公司業主", "淨利淨損歸屬於母公司業主"),
+            eps=_number_field(record, "基本每股盈餘", "繼續營業單位淨利淨損基本每股盈餘"),
+            raw=record,
+        )
+        _attach_margins(item)
+        records.append(item)
+    return records
+
+
+def _fetch_quarterly_financial_period(client: DataClient, year: int, quarter: int) -> list[QuarterlyFinancialRecord]:
+    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb04"
+    records: list[QuarterlyFinancialRecord] = []
+    for market_code, market_name in (("sii", "上市"), ("otc", "上櫃")):
+        payload = {
+            "encodeURIComponent": "1",
+            "step": "1",
+            "firstin": "1",
+            "off": "1",
+            "isQuery": "Y",
+            "TYPEK": market_code,
+            "year": str(year - 1911),
+            "season": f"{quarter:02d}",
+        }
+        text = client.post_text(f"MOPS 季報綜合損益 {market_name} {year}Q{quarter}", url, payload)
+        if not text:
+            continue
+        records.extend(_parse_quarterly_financial_html(text, year, quarter, market_name))
+    return list({record.code: record for record in records}.values())
+
+
+def _parse_quarterly_financial_html(text: str, year: int, quarter: int, market: str) -> list[QuarterlyFinancialRecord]:
+    rows = _TableParser.parse(text)
+    records: list[QuarterlyFinancialRecord] = []
+    headers: list[str] = []
+    for row in rows:
+        normalized = [_normalize_header(cell) for cell in row]
+        if any(cell == "公司代號" for cell in normalized) and any(cell == "公司名稱" for cell in normalized):
+            headers = normalized
+            continue
+        if not headers or len(row) < 3:
+            continue
+        code = row[0].strip()
+        if not code or not code[0].isdigit():
+            continue
+        record = dict(zip(headers, row, strict=False))
+        item = QuarterlyFinancialRecord(
+            code=code,
+            name=_field(record, "公司名稱") or row[1].strip(),
+            market=market,
+            year=year,
+            quarter=quarter,
+            operating_revenue=_number_field(record, "營業收入", "營業收入合計", "收益", "淨收益"),
+            gross_profit=_number_field(record, "營業毛利", "營業毛利毛損", "營業毛利毛損淨額"),
+            operating_income=_number_field(record, "營業利益", "營業利益損失", "營業淨利", "營業淨利淨損"),
+            profit_before_tax=_number_field(record, "稅前淨利", "稅前淨利淨損", "繼續營業單位稅前淨利淨損"),
+            net_income=_number_field(record, "稅後淨利", "本期淨利", "本期淨利淨損", "繼續營業單位本期淨利淨損"),
+            net_income_attributable=_number_field(
+                record,
+                "歸屬母公司業主淨利",
+                "淨利歸屬於母公司業主",
+                "淨利淨損歸屬於母公司業主",
+                "本期淨利淨損歸屬於母公司業主",
+            ),
+            eps=_number_field(record, "每股盈餘", "基本每股盈餘", "基本每股盈餘元"),
+            raw=record,
+        )
+        _attach_margins(item)
+        records.append(item)
+    return records
+
+
 def _fetch_revenue_month(client: DataClient, report_date: date) -> list[RevenueRecord]:
     roc_year = report_date.year - 1911
     month = report_date.month
@@ -605,6 +808,51 @@ def _powershell_get_text(url: str, timeout: int = 20) -> str | None:
     return completed.stdout
 
 
+def _powershell_post_text(url: str, data: dict[str, Any], timeout: int = 20) -> str | None:
+    safe_url = url.replace("'", "''")
+    body_parts: list[str] = []
+    for key, value in data.items():
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            body_parts.append(f"{urllib.parse.quote_plus(str(key))}={urllib.parse.quote_plus(str(item))}")
+    safe_body = "&".join(body_parts).replace("'", "''")
+    safe_ua = USER_AGENT.replace("'", "''")
+    ps_script = (
+        "$ProgressPreference='SilentlyContinue'\n"
+        f"$u = '{safe_url}'\n"
+        f"$body = '{safe_body}'\n"
+        f"$ua = '{safe_ua}'\n"
+        f"$t = {int(timeout)}\n"
+        "$headers = @{ 'User-Agent'=$ua; 'Content-Type'='application/x-www-form-urlencoded' }\n"
+        "$r = Invoke-WebRequest -Uri $u -Method Post -Body $body -Headers $headers -UseBasicParsing -TimeoutSec $t\n"
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+        "$r.Content\n"
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout + 5,
+            check=False,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return None
+    return completed.stdout
+
+
 def _parse_tpex_quotes_payload(payload: dict[str, Any] | None) -> list[StockQuote]:
     if not payload:
         return []
@@ -655,6 +903,85 @@ def _first_text(record: dict[str, Any], keys: list[str]) -> str | None:
         if value is not None:
             return str(value).strip()
     return None
+
+
+def _normalize_header(value: str) -> str:
+    text = re.sub(r"\s+", "", value)
+    text = text.replace("（", "").replace("）", "").replace("(", "").replace(")", "")
+    text = text.replace("%", "").replace("％", "").replace("元", "")
+    text = text.replace("－", "-").replace("、", "")
+    return text
+
+
+def _field(record: dict[str, str], *names: str) -> str | None:
+    for name in names:
+        value = record.get(_normalize_header(name))
+        if value not in (None, ""):
+            return str(value).strip()
+    return None
+
+
+def _number_field(record: dict[str, str], *names: str) -> float | None:
+    value = _field(record, *names)
+    return parse_number(value)
+
+
+def _parse_mopsfin_company_header(header: str) -> tuple[str, str, str]:
+    text = re.sub(r"\s+", " ", header.replace("\xa0", " ")).strip()
+    match = re.match(r"(?P<code>\d{4,6})\s+(?P<name>[^()]+)(?:\((?P<detail>[^)]+)\))?", text)
+    if not match:
+        return "", text, ""
+    detail = match.group("detail") or ""
+    market = "上市" if "上市" in detail else ("上櫃" if "上櫃" in detail else "")
+    return match.group("code"), match.group("name").strip(), market
+
+
+def _attach_margins(record: QuarterlyFinancialRecord) -> None:
+    revenue = record.operating_revenue
+    if revenue in (None, 0):
+        return
+    if record.gross_profit is not None:
+        record.gross_margin_pct = record.gross_profit / revenue * 100
+    if record.operating_income is not None:
+        record.operating_margin_pct = record.operating_income / revenue * 100
+    net_income = record.net_income_attributable if record.net_income_attributable is not None else record.net_income
+    if net_income is not None:
+        record.net_margin_pct = net_income / revenue * 100
+
+
+def _attach_quarterly_comparisons(
+    record: QuarterlyFinancialRecord,
+    previous_year: QuarterlyFinancialRecord | None,
+    previous_quarter: QuarterlyFinancialRecord | None,
+) -> None:
+    if previous_year:
+        record.revenue_yoy_pct = _growth_pct(record.operating_revenue, previous_year.operating_revenue)
+        record.operating_income_yoy_pct = _growth_pct(record.operating_income, previous_year.operating_income)
+        record.net_income_yoy_pct = _growth_pct(_net_income_for_growth(record), _net_income_for_growth(previous_year))
+        if record.gross_margin_pct is not None and previous_year.gross_margin_pct is not None:
+            record.gross_margin_yoy_diff = record.gross_margin_pct - previous_year.gross_margin_pct
+    if previous_quarter:
+        record.revenue_qoq_pct = _growth_pct(record.operating_revenue, previous_quarter.operating_revenue)
+        record.operating_income_qoq_pct = _growth_pct(record.operating_income, previous_quarter.operating_income)
+        record.net_income_qoq_pct = _growth_pct(_net_income_for_growth(record), _net_income_for_growth(previous_quarter))
+        if record.gross_margin_pct is not None and previous_quarter.gross_margin_pct is not None:
+            record.gross_margin_qoq_diff = record.gross_margin_pct - previous_quarter.gross_margin_pct
+
+
+def _net_income_for_growth(record: QuarterlyFinancialRecord) -> float | None:
+    return record.net_income_attributable if record.net_income_attributable is not None else record.net_income
+
+
+def _growth_pct(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous in (None, 0):
+        return None
+    return (current - previous) / abs(previous) * 100
+
+
+def _previous_quarter(year: int, quarter: int) -> tuple[int, int]:
+    if quarter <= 1:
+        return year - 1, 4
+    return year, quarter - 1
 
 
 def _previous_month(value: date) -> date:

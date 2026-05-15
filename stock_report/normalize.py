@@ -19,9 +19,13 @@ def parse_number(value: Any) -> float | None:
     text = str(value).strip().replace(",", "").replace("%", "")
     if text in {"", "--", "-", "X", "除權息", "不比"}:
         return None
+    negative = text.startswith("(") and text.endswith(")")
+    if negative:
+        text = text[1:-1]
     text = text.replace("+", "")
     try:
-        return float(Decimal(text))
+        number = float(Decimal(text))
+        return -number if negative else number
     except (InvalidOperation, ValueError):
         return None
 

@@ -12,6 +12,7 @@ from .models import (
     MarketTurnover,
     NewsDigest,
     NewsItem,
+    QuarterlyFinancialRecord,
     RevenueRecord,
     SourceNote,
     StockNewsSummary,
@@ -23,6 +24,24 @@ from .normalize import fmt_100m, fmt_lots, fmt_num, fmt_pct, fmt_revenue_100m
 URL_RE = re.compile(r"(https?://[^\s<]+)")
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
+NUMERIC_CELL_RE = re.compile(
+    r"^(?P<sign>[+-]?)(?P<number>\d[\d,]*(?:\.\d+)?)(?:\s*(?:%|張|億元|點|倍|個百分點))?$"
+)
+DIRECTIONAL_HEADER_KEYWORDS = (
+    "change",
+    "flow",
+    "mom",
+    "yoy",
+    "外資",
+    "投信",
+    "自營商",
+    "差",
+    "月增率",
+    "年增率",
+    "買賣超",
+    "漲跌",
+    "量變化",
+)
 
 
 def markdown_to_html(markdown: str, title: str | None = None) -> str:
@@ -62,7 +81,7 @@ def markdown_to_html(markdown: str, title: str | None = None) -> str:
             table_html.append("</tr></thead><tbody>")
             for row in rows:
                 table_html.append("<tr>")
-                table_html.extend(f"<td>{_inline_html(cell)}</td>" for cell in row)
+                table_html.extend(_table_cell_html(cell, headers[index] if index < len(headers) else "") for index, cell in enumerate(row))
                 table_html.append("</tr>")
             table_html.append("</tbody></table></div>")
             body.append("".join(table_html))
@@ -102,6 +121,8 @@ def markdown_to_html(markdown: str, title: str | None = None) -> str:
     td:first-child, td:nth-child(2), td:nth-child(3) { white-space:nowrap; }
     td:has(a) { max-width:300px; }
     tbody tr:nth-child(even) { background:#fafbfd; }
+    .num-up { color:#b42318; font-weight:600; }
+    .num-down { color:#15803d; font-weight:600; }
     @media (max-width: 720px) { main { padding:24px 12px 44px; } th, td { padding:8px 9px; font-size:14px; } }
     """.strip()
     return (
@@ -140,6 +161,32 @@ def _inline_html(value: str) -> str:
 def _escape_and_link_urls(value: str) -> str:
     escaped = html_lib.escape(value, quote=False)
     return URL_RE.sub(lambda match: f'<a href="{html_lib.escape(match.group(1), quote=True)}">{match.group(1)}</a>', escaped)
+
+
+def _table_cell_html(cell: str, header: str) -> str:
+    class_name = _numeric_cell_class(cell, header)
+    class_attr = f' class="{class_name}"' if class_name else ""
+    return f"<td{class_attr}>{_inline_html(cell)}</td>"
+
+
+def _numeric_cell_class(cell: str, header: str) -> str:
+    text = cell.strip()
+    match = NUMERIC_CELL_RE.match(text)
+    if not match:
+        return ""
+
+    number = float(match.group("number").replace(",", ""))
+    if number == 0:
+        return ""
+
+    sign = match.group("sign")
+    if sign == "+":
+        return "num-up"
+    if sign == "-":
+        return "num-down"
+    if any(keyword.lower() in header.lower() for keyword in DIRECTIONAL_HEADER_KEYWORDS):
+        return "num-up"
+    return ""
 
 
 def _split_table_row(line: str) -> list[str]:
@@ -306,6 +353,58 @@ def render_monthly_revenue_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_season_report(
+    year: int,
+    quarter: int,
+    watchlist_codes: list[str],
+    records: list[QuarterlyFinancialRecord],
+    featured: list[QuarterlyFinancialRecord],
+    eps_rank: list[QuarterlyFinancialRecord],
+    net_income_growth_rank: list[QuarterlyFinancialRecord],
+    gross_margin_improvement_rank: list[QuarterlyFinancialRecord],
+    revenue_growth_rank: list[QuarterlyFinancialRecord],
+    sources: list[SourceNote],
+) -> str:
+    lines = [
+        f"# 季報追蹤報告 {year} Q{quarter}",
+        "",
+        "> 單位說明：金額以億元列示；MOPS 原始資料單位為仟元。YoY 為去年同期比較，QoQ 為前一季比較。",
+        "",
+        "## AI/規則式快速重點",
+        "",
+    ]
+    lines.extend(_season_summary_bullets(records, featured))
+    lines.extend(["", "## 追蹤清單季報", ""])
+    lines.append(_watchlist_quarterly_table(watchlist_codes, records))
+    lines.extend(
+        [
+            "",
+            "## 全市場精選",
+            "",
+            "> 篩選條件：營收 >= 1 億元，且 EPS、營業利益、稅後淨利資料完整；依 EPS、獲利成長、毛利率改善與營收成長綜合排序。",
+            "",
+        ]
+    )
+    lines.append(_quarterly_table(featured))
+    lines.extend(["", "## EPS 排行", ""])
+    lines.append(_quarterly_table(eps_rank))
+    lines.extend(["", "## 稅後淨利成長排行", ""])
+    lines.append(_quarterly_table(net_income_growth_rank))
+    lines.extend(["", "## 毛利率改善排行", ""])
+    lines.append(_quarterly_table(gross_margin_improvement_rank))
+    lines.extend(["", "## 營收成長排行", ""])
+    lines.append(_quarterly_table(revenue_growth_rank))
+    lines.extend(["", "## 資料來源與注意事項", ""])
+    if not records:
+        lines.append("- 尚未取得季報資料；可能是申報期未到、MOPS 尚未公布，或來源格式變動。")
+    lines.extend(
+        f"- {source.name}：{source.status}。來源：{source.url}"
+        + (f"；說明：{source.detail}" if source.detail else "")
+        for source in sources
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _index_rows(indices: list[IndexSummary], market_turnover: MarketTurnover) -> list[list[str]]:
     return [
         [
@@ -407,6 +506,98 @@ def _watchlist_revenue_table(codes: list[str], revenues: list[RevenueRecord]) ->
             ]
         )
     return table(["代號", "名稱", "資料月份", "最新月營收（億元）", "單月年增率", "月增率", "累計年增率"], rows)
+
+
+def _watchlist_quarterly_table(codes: list[str], records: list[QuarterlyFinancialRecord]) -> str:
+    if not codes:
+        return "尚未設定追蹤個股。\n"
+    record_map = {r.code: r for r in records}
+    rows: list[list[str]] = []
+    for code in codes:
+        record = record_map.get(code)
+        if not record:
+            rows.append(
+                [
+                    code,
+                    "資料待確認",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                    "尚未公布",
+                ]
+            )
+            continue
+        rows.append(_quarterly_row(record))
+    return table(_quarterly_headers(), rows)
+
+
+def _quarterly_table(records: list[QuarterlyFinancialRecord]) -> str:
+    return table(_quarterly_headers(), [_quarterly_row(record) for record in records])
+
+
+def _quarterly_headers() -> list[str]:
+    return [
+        "代號",
+        "名稱",
+        "市場",
+        "營收（億元）",
+        "毛利（億元）",
+        "營業利益（億元）",
+        "稅後淨利（億元）",
+        "EPS",
+        "營收YoY",
+        "稅後淨利YoY",
+        "毛利率",
+        "毛利率YoY差",
+    ]
+
+
+def _quarterly_row(record: QuarterlyFinancialRecord) -> list[str]:
+    return [
+        record.code,
+        record.name,
+        record.market,
+        fmt_revenue_100m(record.operating_revenue),
+        fmt_revenue_100m(record.gross_profit),
+        fmt_revenue_100m(record.operating_income),
+        fmt_revenue_100m(_record_net_income(record)),
+        fmt_num(record.eps),
+        fmt_pct(record.revenue_yoy_pct),
+        fmt_pct(record.net_income_yoy_pct),
+        fmt_pct(record.gross_margin_pct),
+        _fmt_pct_point(record.gross_margin_yoy_diff),
+    ]
+
+
+def _record_net_income(record: QuarterlyFinancialRecord) -> float | None:
+    return record.net_income_attributable if record.net_income_attributable is not None else record.net_income
+
+
+def _fmt_pct_point(value: float | None) -> str:
+    if value is None:
+        return "尚未公布"
+    return f"{value:+.2f} 個百分點"
+
+
+def _season_summary_bullets(records: list[QuarterlyFinancialRecord], featured: list[QuarterlyFinancialRecord]) -> list[str]:
+    if not records:
+        return ["- 尚未取得可整理的季報資料。"]
+    complete = [r for r in records if r.eps is not None and _record_net_income(r) is not None]
+    positive_eps = [r for r in complete if (r.eps or 0) > 0]
+    bullets = [
+        f"- 本次取得 {len(records)} 檔上市櫃季報資料，其中 {len(complete)} 檔具備 EPS 與稅後淨利資料。",
+        f"- EPS 為正的公司共 {len(positive_eps)} 檔；全市場精選先列 {len(featured)} 檔。",
+    ]
+    if featured:
+        top = featured[0]
+        bullets.append(f"- 綜合排序最高為 {top.code} {top.name}，EPS {fmt_num(top.eps)}，稅後淨利 YoY {fmt_pct(top.net_income_yoy_pct)}。")
+    return bullets
 
 
 def _ai_summary_block(digest: NewsDigest) -> list[str]:

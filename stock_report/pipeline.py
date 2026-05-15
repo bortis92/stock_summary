@@ -7,6 +7,8 @@ from pathlib import Path
 from .ai import summarize_news
 from .analysis import (
     abnormal_volume_price,
+    quarterly_financial_rank,
+    quarterly_financial_screen,
     revenue_growth_filter,
     sort_by_change_pct,
     sort_by_turnover,
@@ -17,13 +19,15 @@ from .fetchers import (
     fetch_global_markets,
     fetch_market_turnover,
     fetch_news,
+    fetch_quarterly_financials,
+    fetch_quarterly_financials_for_codes,
     fetch_revenues,
     fetch_tpex_quotes,
     fetch_twse_institution_by_stock,
     fetch_twse_institution_summary,
     fetch_twse_quotes,
 )
-from .render import markdown_to_html, render_monthly_revenue_report, render_report
+from .render import markdown_to_html, render_monthly_revenue_report, render_report, render_season_report
 from .watchlist import load_watchlist
 
 
@@ -103,6 +107,9 @@ def build_report(report_date: date, output_dir: Path, watchlist_path: Path) -> P
     write_html_report(output_path, markdown_to_html(markdown))
     if 5 <= report_date.day <= 12:
         _write_monthly_revenue_report(report_date, output_dir, watchlist_codes)
+    season_period = _season_report_period_for_date(report_date)
+    if season_period:
+        _write_season_report(season_period[0], season_period[1], output_dir, watchlist_codes)
     write_report_index(output_dir)
     return output_path
 
@@ -121,6 +128,35 @@ def _write_monthly_revenue_report(report_date: date, output_dir: Path, watchlist
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / MONTHLY_REPORT
+    write_html_report(output_path, markdown_to_html(markdown))
+    write_report_index(output_dir)
+    return output_path
+
+
+def _write_season_report(year: int, quarter: int, output_dir: Path, watchlist_codes: list[str]) -> Path:
+    client = DataClient()
+    records = fetch_quarterly_financials(client, year, quarter)
+    if not records and watchlist_codes:
+        records = fetch_quarterly_financials_for_codes(client, year, quarter, watchlist_codes)
+    featured = quarterly_financial_screen(records, limit=30, min_revenue=100_000)
+    eps_rank = quarterly_financial_rank(records, "eps", limit=30, min_revenue=100_000)
+    net_income_growth_rank = quarterly_financial_rank(records, "net_income_yoy_pct", limit=30, min_revenue=100_000)
+    gross_margin_improvement_rank = quarterly_financial_rank(records, "gross_margin_yoy_diff", limit=30, min_revenue=100_000)
+    revenue_growth_rank = quarterly_financial_rank(records, "revenue_yoy_pct", limit=30, min_revenue=100_000)
+    markdown = render_season_report(
+        year=year,
+        quarter=quarter,
+        watchlist_codes=watchlist_codes,
+        records=records,
+        featured=featured,
+        eps_rank=eps_rank,
+        net_income_growth_rank=net_income_growth_rank,
+        gross_margin_improvement_rank=gross_margin_improvement_rank,
+        revenue_growth_rank=revenue_growth_rank,
+        sources=client.sources,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / SEASON_REPORT
     write_html_report(output_path, markdown_to_html(markdown))
     write_report_index(output_dir)
     return output_path
@@ -208,6 +244,20 @@ def _latest_revenue_month_date(report_date: date) -> date:
         year -= 1
         month = 12
     return date(year, month, 1)
+
+
+def _season_report_period_for_date(report_date: date) -> tuple[int, int] | None:
+    month = report_date.month
+    day = report_date.day
+    if (month == 3 and day >= 20) or month == 4:
+        return report_date.year - 1, 4
+    if month == 5:
+        return report_date.year, 1
+    if month == 8 or (month == 9 and day <= 10):
+        return report_date.year, 2
+    if month == 11:
+        return report_date.year, 3
+    return None
 
 
 def _env_int(name: str, default: int) -> int:

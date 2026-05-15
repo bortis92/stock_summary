@@ -28,6 +28,8 @@ reports/season.html
 
 根目錄的 `index.html` 是 GitHub Pages 入口。日報只保留最新三份：`reports/daily_0.html` 是最新日報，`reports/daily_1.html` 是前一份，`reports/daily_2.html` 是前二份。月營收報告固定覆寫 `reports/month.html`；季報固定使用 `reports/season.html`。
 
+季報會在申報期窗口自動檢查並覆寫 `reports/season.html`：Q4/年報為 3/20-4/30，Q1 為 5 月，Q2 為 8/1-9/10，Q3 為 11 月。季報資料使用公開資訊觀測站 IFRS 綜合損益彙總表，包含營業收入、毛利、營業利益、稅前淨利、稅後淨利與 EPS，並保留追蹤清單區塊。
+
 ## 追蹤清單
 
 建立 `watchlist.txt`，每行一檔股票代號，可使用 `#` 註解：

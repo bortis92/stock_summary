@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from .models import InstitutionByStock, RevenueRecord, StockQuote
+from .models import InstitutionByStock, QuarterlyFinancialRecord, RevenueRecord, StockQuote
 
 
 def previous_calendar_day(report_date: date) -> date:
@@ -72,6 +72,53 @@ def revenue_growth_filter(
     )
 
 
+def quarterly_financial_screen(
+    records: list[QuarterlyFinancialRecord],
+    limit: int = 30,
+    min_revenue: float | None = 100_000,
+) -> list[QuarterlyFinancialRecord]:
+    candidates = [
+        r
+        for r in records
+        if r.eps is not None
+        and r.operating_revenue is not None
+        and (min_revenue is None or r.operating_revenue >= min_revenue)
+        and _net_income(r) is not None
+        and r.operating_income is not None
+    ]
+    return sorted(candidates, key=_quarterly_score, reverse=True)[:limit]
+
+
+def quarterly_financial_rank(
+    records: list[QuarterlyFinancialRecord],
+    field: str,
+    limit: int = 30,
+    reverse: bool = True,
+    min_revenue: float | None = 100_000,
+) -> list[QuarterlyFinancialRecord]:
+    candidates = [
+        r
+        for r in records
+        if getattr(r, field) is not None
+        and (min_revenue is None or (r.operating_revenue is not None and r.operating_revenue >= min_revenue))
+    ]
+    return sorted(candidates, key=lambda r: getattr(r, field) or 0, reverse=reverse)[:limit]
+
+
+def _quarterly_score(record: QuarterlyFinancialRecord) -> float:
+    score = 0.0
+    score += (record.eps or 0) * 2
+    score += (record.net_income_yoy_pct or 0) * 0.3
+    score += (record.operating_income_yoy_pct or 0) * 0.25
+    score += (record.gross_margin_yoy_diff or 0) * 1.5
+    score += (record.revenue_yoy_pct or 0) * 0.15
+    return score
+
+
+def _net_income(record: QuarterlyFinancialRecord) -> float | None:
+    return record.net_income_attributable if record.net_income_attributable is not None else record.net_income
+
+
 def quote_by_code(quotes: list[StockQuote]) -> dict[str, StockQuote]:
     return {q.code: q for q in quotes}
 
@@ -81,4 +128,8 @@ def institution_by_code(rows: list[InstitutionByStock]) -> dict[str, Institution
 
 
 def revenues_by_code(rows: list[RevenueRecord]) -> dict[str, RevenueRecord]:
+    return {r.code: r for r in rows}
+
+
+def quarterly_financials_by_code(rows: list[QuarterlyFinancialRecord]) -> dict[str, QuarterlyFinancialRecord]:
     return {r.code: r for r in rows}

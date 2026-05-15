@@ -79,6 +79,34 @@ class RevenueRecord:
 
 
 @dataclass
+class QuarterlyFinancialRecord:
+    code: str
+    name: str
+    market: str
+    year: int
+    quarter: int
+    operating_revenue: float | None = None
+    gross_profit: float | None = None
+    operating_income: float | None = None
+    profit_before_tax: float | None = None
+    net_income: float | None = None
+    net_income_attributable: float | None = None
+    eps: float | None = None
+    gross_margin_pct: float | None = None
+    operating_margin_pct: float | None = None
+    net_margin_pct: float | None = None
+    revenue_yoy_pct: float | None = None
+    operating_income_yoy_pct: float | None = None
+    net_income_yoy_pct: float | None = None
+    gross_margin_yoy_diff: float | None = None
+    revenue_qoq_pct: float | None = None
+    operating_income_qoq_pct: float | None = None
+    net_income_qoq_pct: float | None = None
+    gross_margin_qoq_diff: float | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class GlobalMarket:
     name: str
     close: float | None
