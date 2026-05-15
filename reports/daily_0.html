@@ -22,8 +22,9 @@
     table { width:max-content; min-width:100%; border-collapse:collapse; table-layout:auto; }
     th, td { padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
     th { position:sticky; top:0; background:#eef3f8; font-weight:700; color:#24324a; white-space:nowrap; }
-    td { white-space:nowrap; max-width:220px; }
-    td:has(a) { max-width:280px; white-space:normal; }
+    td { max-width:260px; white-space:normal; overflow-wrap:anywhere; }
+    td:first-child, td:nth-child(2), td:nth-child(3) { white-space:nowrap; }
+    td:has(a) { max-width:300px; }
     tbody tr:nth-child(even) { background:#fafbfd; }
     @media (max-width: 720px) { main { padding:24px 12px 44px; } th, td { padding:8px 9px; font-size:14px; } }
   </style>

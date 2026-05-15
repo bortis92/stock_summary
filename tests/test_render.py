@@ -79,6 +79,22 @@ class RenderTest(unittest.TestCase):
         self.assertIn("<table>", html)
         self.assertIn('<a href="https://example.test/report">https://example.test/report</a>', html)
 
+    def test_table_cells_allow_long_text_to_wrap(self) -> None:
+        html = markdown_to_html(
+            "\n".join(
+                [
+                    "# Report",
+                    "",
+                    "| Code | Name | Topic | AI Summary | Source |",
+                    "| --- | --- | --- | --- | --- |",
+                    "| 2330 | TSMC | Topic | Long summary text | [Source](https://example.test/a-very-long-url) |",
+                ]
+            )
+        )
+
+        self.assertIn("overflow-wrap:anywhere", html)
+        self.assertIn("td:first-child, td:nth-child(2), td:nth-child(3)", html)
+
 
 if __name__ == "__main__":
     unittest.main()
